@@ -9,6 +9,7 @@ dash-html-components==2.0.0
 dash-table==5.0.0
 Flask==3.0.3
 frozendict==2.4.4
+gunicorn==22.0.0
 holidays==0.51
 html5lib==1.1
 idna==3.7
