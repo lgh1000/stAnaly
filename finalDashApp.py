@@ -719,6 +719,6 @@ def update_data_and_plot(n_intervals,
 
 # Run the Dash app
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=True, port=8000)
 else:
     server = app.server
