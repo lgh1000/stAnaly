@@ -15,6 +15,7 @@ import holidays
 import requests
 from requests.exceptions import RequestException
 from bs4 import BeautifulSoup
+import os
 
 import pandas_datareader as pdr
 import threading
@@ -719,6 +720,9 @@ def update_data_and_plot(n_intervals,
 
 # Run the Dash app
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8000)
+    port = int(os.environ.get('PORT', 8000))
+    app.run_server(debug=True, host='0.0.0.0', port=port)
+    # starts the Dash app server in debug mode, binding it to the 0.0.0.0 host (which listens on all available network interfaces) and the port specified by the port variable in render.
+
 else:
     server = app.server
