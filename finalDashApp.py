@@ -720,9 +720,9 @@ def update_data_and_plot(n_intervals,
 
 # Run the Dash app
 if __name__ == '__main__':
-    app.run_server(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
+    app.run_server(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
 
-
+#http://127.0.0.1:10000  is where local dash app will run, the alst number being the port assigned, f none, then it would be 8050
 
 
 
