@@ -721,7 +721,8 @@ def update_data_and_plot(n_intervals,
 # Run the Dash app
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8000))
-    app.run_server(debug=True, host='0.0.0.0', port=port)
+    print(f"Starting Dash app on port {port}")
+    app.run_server(debug=True, host='0.0.0.0', port=port, use_reloader=False)
     # starts the Dash app server in debug mode, binding it to the 0.0.0.0 host (which listens on all available network interfaces) and the port specified by the port variable in render.
 
 else:
