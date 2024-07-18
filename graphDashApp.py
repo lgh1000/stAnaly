@@ -12,14 +12,14 @@ import plotly.graph_objects as go
 import datetime
 from datetime import datetime, time, timedelta
 import holidays
-import requests
-from requests.exceptions import RequestException
-from bs4 import BeautifulSoup
+# import requests
+# from requests.exceptions import RequestException
+# from bs4 import BeautifulSoup
 import os
 
 import pandas_datareader as pdr
-import threading
-import multiprocessing
+# import threading
+# import multiprocessing
 
 # import time
 import logging
@@ -63,22 +63,22 @@ app.layout = html.Div([
             #         style_data={'minWidth': '10%', 'maxWidth': '30%'}
             #     ),
             # ]),
-            html.Div(id='stock-screener-container', children=[
-                html.H2('Stock Screener'),
-                dash_table.DataTable(
-                    id='stock-screener-table',
-                    columns=[
-                        {"name": "Ticker", "id": "Ticker"},
-                        {"name": "Close", "id": "Close"},
-                        {"name": "Market Cap", "id": "Market Cap"},
-                    ],
-                    data=[],
-                    style_table={'overflowX': 'scroll'},
-                    style_cell={'whiteSpace': 'normal'},
-                    style_data={'minWidth': '10%', 'maxWidth': '30%'},
-                    row_selectable='single',  # Enable row selection
-                ),
-            ]),
+            # html.Div(id='stock-screener-container', children=[
+            #     html.H2('Stock Screener'),
+            #     dash_table.DataTable(
+            #         id='stock-screener-table',
+            #         columns=[
+            #             {"name": "Ticker", "id": "Ticker"},
+            #             {"name": "Close", "id": "Close"},
+            #             {"name": "Market Cap", "id": "Market Cap"},
+            #         ],
+            #         data=[],
+            #         style_table={'overflowX': 'scroll'},
+            #         style_cell={'whiteSpace': 'normal'},
+            #         style_data={'minWidth': '10%', 'maxWidth': '30%'},
+            #         row_selectable='single',  # Enable row selection
+            #     ),
+            # ]),
 
             
 
@@ -179,48 +179,48 @@ app.layout = html.Div([
 #     except Exception as e:
 #         print(f"Error fetching tickers: {e}")
 #         return []
-def fetch_tickers_process():
-    try:
-        # Freeze support for multiprocessing on Windows
-        multiprocessing.freeze_support()
+# def fetch_tickers_process():
+#     try:
+#         # Freeze support for multiprocessing on Windows
+#         multiprocessing.freeze_support()
 
-        url = "https://www.nasdaq.com/market-activity/stocks/screener"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, "html.parser")
+#         url = "https://www.nasdaq.com/market-activity/stocks/screener"
+#         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+#         response = requests.get(url, headers=headers)
+#         soup = BeautifulSoup(response.text, "html.parser")
 
-        # Print response text for debugging
-        # print(soup.prettify())
+#         # Print response text for debugging
+#         # print(soup.prettify())
 
-        tickers = []
-        table = soup.find("table", {"class": "nasdaq-screener__table"})
-        if table:
-            rows = table.find_all("tr", {"class": "nasdaq-screener__row"})
-            for row in rows:
-                symbol_cell = row.find("th", {"scope": "row", "class": "nasdaq-screener__cell"})
-                if symbol_cell:
-                    symbol = symbol_cell.find("a", {"class": "firstCell"}).text.strip()
-                    tickers.append(symbol)
+#         tickers = []
+#         table = soup.find("table", {"class": "nasdaq-screener__table"})
+#         if table:
+#             rows = table.find_all("tr", {"class": "nasdaq-screener__row"})
+#             for row in rows:
+#                 symbol_cell = row.find("th", {"scope": "row", "class": "nasdaq-screener__cell"})
+#                 if symbol_cell:
+#                     symbol = symbol_cell.find("a", {"class": "firstCell"}).text.strip()
+#                     tickers.append(symbol)
 
-        return tickers
-    except Exception as e:
-        print(f"Error fetching tickers: {e}")
-        return []
-
-
-# Test the function
-tickers = fetch_tickers_process()
-# print(tickers)
+#         return tickers
+#     except Exception as e:
+#         print(f"Error fetching tickers: {e}")
+#         return []
 
 
-def get_all_stock_tickers():
-    if __name__ == '__main__':
-        # Start the separate process to fetch tickers
-        tickers_process = multiprocessing.Process(target=fetch_tickers_process)
-        tickers_process.start()
+# # Test the function
+# tickers = fetch_tickers_process()
+# # print(tickers)
 
-    # Return an empty list initially
-    return []
+
+# def get_all_stock_tickers():
+#     if __name__ == '__main__':
+#         # Start the separate process to fetch tickers
+#         tickers_process = multiprocessing.Process(target=fetch_tickers_process)
+#         tickers_process.start()
+
+#     # Return an empty list initially
+#     return []
 
 
 
@@ -244,11 +244,11 @@ def get_all_stock_tickers():
 #         return []
 
 
-def get_market_cap(ticker):
-    stock = yf.Ticker(ticker)
-    market_cap = stock.info.get("marketCap")
-    return market_cap
-# screener_data_cache = []
+# def get_market_cap(ticker):
+#     stock = yf.Ticker(ticker)
+#     market_cap = stock.info.get("marketCap")
+#     return market_cap
+# # screener_data_cache = []
 
 def get_stock_data(ticker, period='1y', interval='1d'):
     stock = yf.Ticker(ticker)
@@ -281,64 +281,64 @@ def get_stock_data(ticker, period='1y', interval='1d'):
 #     stock_data = pdr.get_data_yahoo(ticker, start=start_date, end=end_date, interval=interval)
 #     return stock_data
 
-def fetch_screener_data():
-    global screener_data
-    tickers = get_all_stock_tickers()
-    screener_data = []
-    logging.info(f"Fetched {len(tickers)} tickers from NASDAQ")
-    skipped_tickers = []
-    processed_tickers = []
+# def fetch_screener_data():
+#     global screener_data
+#     tickers = get_all_stock_tickers()
+#     screener_data = []
+#     logging.info(f"Fetched {len(tickers)} tickers from NASDAQ")
+#     skipped_tickers = []
+#     processed_tickers = []
 
 
-    for ticker in tickers:
-        if ticker == 'Y':
-            logging.warning(f"Skipping ticker 'Y' due to known issue")
-            skipped_tickers.append(ticker)
-            continue
+#     for ticker in tickers:
+#         if ticker == 'Y':
+#             logging.warning(f"Skipping ticker 'Y' due to known issue")
+#             skipped_tickers.append(ticker)
+#             continue
 
-        try:
-            stock_data = get_stock_data(ticker, '1y', '1d')
-            if not stock_data.empty:
-                stock_data['SMA_50'] = stock_data['Close'].rolling(window=50).mean()
-                stock_data['SMA_20'] = stock_data['Close'].rolling(window=20).mean()
-                stock_data['SMA_7'] = stock_data['Close'].rolling(window=7).mean()
-                stock_data['HMA_6'] = ((2 * stock_data['Close'].rolling(window=3).mean() - stock_data['Close'].rolling(window=6).mean()).rolling(window=int(6**0.5)).mean())
+#         try:
+#             stock_data = get_stock_data(ticker, '1y', '1d')
+#             if not stock_data.empty:
+#                 stock_data['SMA_50'] = stock_data['Close'].rolling(window=50).mean()
+#                 stock_data['SMA_20'] = stock_data['Close'].rolling(window=20).mean()
+#                 stock_data['SMA_7'] = stock_data['Close'].rolling(window=7).mean()
+#                 stock_data['HMA_6'] = ((2 * stock_data['Close'].rolling(window=3).mean() - stock_data['Close'].rolling(window=6).mean()).rolling(window=int(6**0.5)).mean())
 
-                market_cap = get_market_cap(ticker)
-                close = stock_data['Close'].iloc[-1]
-                sma_50 = stock_data['SMA_50'].iloc[-1]
-                sma_20 = stock_data['SMA_20'].iloc[-1]
-                sma_7 = stock_data['SMA_7'].iloc[-1]
-                hma_6 = stock_data['HMA_6'].iloc[-1]
+#                 market_cap = get_market_cap(ticker)
+#                 close = stock_data['Close'].iloc[-1]
+#                 sma_50 = stock_data['SMA_50'].iloc[-1]
+#                 sma_20 = stock_data['SMA_20'].iloc[-1]
+#                 sma_7 = stock_data['SMA_7'].iloc[-1]
+#                 hma_6 = stock_data['HMA_6'].iloc[-1]
 
-                if (close > sma_50 and close > sma_20 and close > sma_7 and
-                    hma_6 > sma_7 and
-                    0.13 <= (close - sma_50) / sma_50 <= 0.20):
-                    screener_data.append({'Ticker': ticker, 'Close': close, 'Market Cap': market_cap})
-                    processed_tickers.append(ticker)
-            else:
-                logging.warning(f"No data found for ticker {ticker}")
-        except Exception as e:
-            logging.error(f"Error fetching data for ticker {ticker}: {e}")
-            skipped_tickers.append(ticker)
+#                 if (close > sma_50 and close > sma_20 and close > sma_7 and
+#                     hma_6 > sma_7 and
+#                     0.13 <= (close - sma_50) / sma_50 <= 0.20):
+#                     screener_data.append({'Ticker': ticker, 'Close': close, 'Market Cap': market_cap})
+#                     processed_tickers.append(ticker)
+#             else:
+#                 logging.warning(f"No data found for ticker {ticker}")
+#         except Exception as e:
+#             logging.error(f"Error fetching data for ticker {ticker}: {e}")
+#             skipped_tickers.append(ticker)
 
-    screener_data = sorted(screener_data, key=lambda x: x['Market Cap'], reverse=True)
-    logging.info(f"Screener data updated with {len(screener_data)} tickers")
-    logging.info(f"Skipped {len(skipped_tickers)} tickers due to errors: {', '.join(skipped_tickers)}")
-    logging.info(f"Processed tickers: {', '.join(processed_tickers[:10])}")  # Log the first 10 processed tickers
-    return screener_data
+#     screener_data = sorted(screener_data, key=lambda x: x['Market Cap'], reverse=True)
+#     logging.info(f"Screener data updated with {len(screener_data)} tickers")
+#     logging.info(f"Skipped {len(skipped_tickers)} tickers due to errors: {', '.join(skipped_tickers)}")
+#     logging.info(f"Processed tickers: {', '.join(processed_tickers[:10])}")  # Log the first 10 processed tickers
+#     return screener_data
 
-# update screener data asynchronously so that the restr of teh app still loads:
-def update_screener_data():
-    global screener_data
-    # tickers = get_all_stock_tickers()
-    screener_data = fetch_screener_data()
+# # update screener data asynchronously so that the restr of teh app still loads:
+# def update_screener_data():
+#     global screener_data
+#     # tickers = get_all_stock_tickers()
+#     screener_data = fetch_screener_data()
 
-# Get all stock tickers and fetch screener data on app start
+# # Get all stock tickers and fetch screener data on app start
 
-tickers = get_all_stock_tickers()
-screener_data_thread = threading.Thread(target=update_screener_data)
-screener_data_thread.start()
+# tickers = get_all_stock_tickers()
+# screener_data_thread = threading.Thread(target=update_screener_data)
+# screener_data_thread.start()
 
 def is_market_open():
     current_time = datetime.now()
@@ -530,7 +530,7 @@ def update_intervals(stock_timeframe, option_timeframe):
 
 @app.callback(
     Output('stock-plot', 'figure'),
-    Output('stock-screener-table', 'data'),
+    # Output('stock-screener-table', 'data'),
     Output('option-plot', 'figure'),
     Output('option-table', 'data'),
     Output('alerts-container', 'children'),
@@ -546,8 +546,8 @@ def update_intervals(stock_timeframe, option_timeframe):
     Input('option-strike-input', 'value'),
     Input('option-timeframe-dropdown', 'value'),
     Input('option-interval-dropdown', 'value'),
-    Input('stock-screener-table', 'selected_rows'),
-    State('stock-screener-table', 'data'),
+    # Input('stock-screener-table', 'selected_rows'),
+    # State('stock-screener-table', 'data'),
 )
 
 
@@ -555,13 +555,13 @@ def update_intervals(stock_timeframe, option_timeframe):
 def update_data_and_plot(n_intervals,
                          stock_ticker, stock_timeframe, stock_interval,
                          option_ticker, option_type, option_expiry, option_strike,
-                           option_timeframe, option_interval, selected_rows, screener_data):
+                           option_timeframe, option_interval):
     
     ctx = dash.callback_context
     triggered_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
     # If screener_data is empty, start the separate process to fetch tickers
-    if not screener_data:
-        get_all_stock_tickers()
+    # if not screener_data:
+    #     get_all_stock_tickers()
 
     # Initialize outputs
     stock_fig = go.Figure()
@@ -716,7 +716,7 @@ def update_data_and_plot(n_intervals,
     
 
 
-    return stock_fig, list(screener_data), option_fig, option_table_data, alerts_content, update_interval
+    return stock_fig, option_fig, option_table_data, alerts_content, update_interval
 
 # Run the Dash app
 if __name__ == '__main__':
