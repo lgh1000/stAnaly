@@ -47,47 +47,22 @@ app.layout = html.Div([
     html.Div([
         html.Div([
             html.H2('Stock'),
-            dcc.Input(id='stock-ticker-input', type='text', placeholder='Enter Stock Ticker Symbol (e.g., aapl)', style={'width': '50%'}),
+            dcc.Input(id='stock-ticker-input', type='text', value='NVDA', placeholder='Enter Stock Ticker Symbol (e.g., aapl)', style={'width': '50%'}),
             dcc.Dropdown(id='stock-timeframe-dropdown', options=[{'label': i, 'value': i} for i in timeframes], value='1d', placeholder='Select Timeframe', style={'width': '50%'}),
             dcc.Dropdown(id='stock-interval-dropdown', options=[{'label': i, 'value': i} for i in time_intervals], value='1m', placeholder='Select Interval', style={'width': '50%'}),
             html.Div(id='alerts-container'),
-            dcc.Graph(id='stock-plot', style={'height': '70vh'}),
-            # html.Div(id='stock-table-container', children=[
-            #     html.H2('Stock Data Table'),
-            #     dash_table.DataTable(
-            #         id='stock-table',
-            #         columns=[{"name": i, "id": i} for i in ['Date', 'Close', 'Volume']],
-            #         data=[],
-            #         style_table={'overflowX': 'scroll'},
-            #         style_cell={'whiteSpace': 'normal'},
-            #         style_data={'minWidth': '10%', 'maxWidth': '30%'}
-            #     ),
-            # ]),
-            # html.Div(id='stock-screener-container', children=[
-            #     html.H2('Stock Screener'),
-            #     dash_table.DataTable(
-            #         id='stock-screener-table',
-            #         columns=[
-            #             {"name": "Ticker", "id": "Ticker"},
-            #             {"name": "Close", "id": "Close"},
-            #             {"name": "Market Cap", "id": "Market Cap"},
-            #         ],
-            #         data=[],
-            #         style_table={'overflowX': 'scroll'},
-            #         style_cell={'whiteSpace': 'normal'},
-            #         style_data={'minWidth': '10%', 'maxWidth': '30%'},
-            #         row_selectable='single',  # Enable row selection
-            #     ),
-            # ]),
+            dcc.Graph(id='stock-plot', style={'height': '70vh', 'width': '100%'}),
+
+
 
             
 
-        ], style={'width': '70%', 'display': 'inline-block', 'vertical-align': 'top'}),
+        ], style={'width': '60%', 'display': 'inline-block', 'vertical-align': 'top'}),
         
         html.Div([
             html.H2('Option'),
-            dcc.Input(id='option-ticker-input', type='text', placeholder='Enter Stock Ticker (e.g., aapl)', style={'width': '90%'}),
-            dcc.Input(id='option-type-input', type='text', placeholder='Enter Option Type (c or p)', style={'width': '90%'}),
+            dcc.Input(id='option-ticker-input', type='text', value='NVDA', placeholder='Enter Stock Ticker (e.g., aapl)', style={'width': '90%'}),
+            dcc.Input(id='option-type-input', type='text', value ='c', placeholder='Enter Option Type (c or p)', style={'width': '90%'}),
             dcc.Input(id='option-expiry-input', type='text', placeholder='Enter Expiry Date (YYYY-MM-DD)', style={'width': '90%'}),
             dcc.Input(id='option-strike-input', type='number', placeholder='Enter Strike Price', style={'width': '90%'}),
             dcc.Dropdown(id='option-timeframe-dropdown', options=[{'label': i, 'value': i} for i in timeframes], value='1d', placeholder='Select Timeframe', style={'width': '90%'}),
@@ -105,7 +80,7 @@ app.layout = html.Div([
             ]),
 
 
-        ], style={'width': '28%', 'display': 'inline-block', 'vertical-align': 'top'}),
+        ], style={'width': '40%', 'display': 'inline-block', 'vertical-align': 'top'}),
     ]),
     
     dcc.Interval(
@@ -460,7 +435,12 @@ def plot_data(data, title, is_option=False):
     fig.update_layout(
         title=f'{title} Prices',
         xaxis_title='Time',
+        xaxis_rangeslider_visible=False,  # Remove the range slider
+        xaxis_range=[data.index[0], data.index[-1]],  # Set the x-axis range to the data range
         yaxis_title='Price',
+        margin=dict(l=50, r=20, t=50, b=50),  # Adjust the margins
+        autosize=True,  # Automatically size the plot area
+        #yaxis_title='Price',
         # legend_title='Price Type'
     )
     
