@@ -12,18 +12,28 @@ import logging
 import requests
 import json
 from time import sleep
+import traceback
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging to see detailed errors
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
 
-# Finnhub API key - REPLACE THIS WITH YOUR ACTUAL API KEY
-FINNHUB_API_KEY = "cv0bht1r01qo8ssfr960cv0bht1r01qo8ssfr96g"  # Get this by signing up at finnhub.io
+# Get API key from environment variable for security
+# You can set this in your Render dashboard under Environment Variables
+FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY", "")
+
+# Add debug logging for API key
+if not FINNHUB_API_KEY:
+    logging.warning("FINNHUB_API_KEY not found in environment variables. Set this in your Render dashboard.")
 
 # Initialize Dash app
 app = dash.Dash(__name__)
-
-# IMPORTANT: This is what Render looks for
-server = app.server  # Add this line for Render deployment
-
+server = app.server  # Important for Render deployment
 
 # List of options for time interval and timeframe
 time_intervals = ['1m', '5m', '15m', '30m', '1h', '1d', '1wk', '1mo']
@@ -40,7 +50,7 @@ app.layout = html.Div([
     html.Div([
         html.Div([
             html.H2('Stock'),
-            dcc.Input(id='stock-ticker-input', type='text', value='NVDA', placeholder='Enter Stock Ticker Symbol (e.g., AAPL)', style={'width': '50%'}),
+            dcc.Input(id='stock-ticker-input', type='text', value='AAPL', placeholder='Enter Stock Ticker Symbol (e.g., AAPL)', style={'width': '50%'}),
             dcc.Dropdown(id='stock-timeframe-dropdown', options=[{'label': i, 'value': i} for i in timeframes], value='1d', placeholder='Select Timeframe', style={'width': '50%'}),
             dcc.Dropdown(id='stock-interval-dropdown', options=[{'label': i, 'value': i} for i in time_intervals], value='15m', placeholder='Select Interval', style={'width': '50%'}),
             html.Div(id='alerts-container'),
@@ -49,7 +59,7 @@ app.layout = html.Div([
         
         html.Div([
             html.H2('Option'),
-            dcc.Input(id='option-ticker-input', type='text', value='NVDA', placeholder='Enter Stock Ticker (e.g., AAPL)', style={'width': '90%'}),
+            dcc.Input(id='option-ticker-input', type='text', value='AAPL', placeholder='Enter Stock Ticker (e.g., AAPL)', style={'width': '90%'}),
             dcc.Input(id='option-type-input', type='text', value='c', placeholder='Enter Option Type (c or p)', style={'width': '90%'}),
             dcc.Input(id='option-expiry-input', type='text', placeholder='Enter Expiry Date (YYYY-MM-DD)', style={'width': '90%'}),
             dcc.Input(id='option-strike-input', type='number', placeholder='Enter Strike Price', style={'width': '90%'}),
@@ -70,7 +80,8 @@ app.layout = html.Div([
     ]),
     
     html.Div([
-        html.P("Data provided by Finnhub.io", style={'textAlign': 'center', 'color': 'gray', 'fontSize': '12px'}),
+        html.P(f"Data provided by Finnhub.io - API Key Status: {'Configured' if FINNHUB_API_KEY else 'Not Configured'}", 
+               style={'textAlign': 'center', 'color': 'green' if FINNHUB_API_KEY else 'red', 'fontSize': '12px'}),
     ]),
     
     dcc.Interval(
@@ -134,26 +145,6 @@ def convert_timeframe_to_seconds(timeframe):
         return 60 * 60 * 24 * 365 * 20  # 20 years should be enough for most stocks
     return 60 * 60 * 24  # Default to 1 day
 
-def convert_interval_to_seconds(interval):
-    """Convert interval string to seconds for Finnhub API"""
-    if interval == '1m':
-        return 60
-    elif interval == '5m':
-        return 300
-    elif interval == '15m':
-        return 900
-    elif interval == '30m':
-        return 1800
-    elif interval == '1h':
-        return 3600
-    elif interval == '1d':
-        return 86400
-    elif interval == '1wk':
-        return 604800
-    elif interval == '1mo':
-        return 2592000
-    return 900  # Default to 15m
-
 def get_finnhub_resolution(interval):
     """Convert our interval format to Finnhub's resolution format"""
     interval_map = {
@@ -172,6 +163,12 @@ def get_stock_data(ticker, timeframe='1d', interval='15m'):
     """
     Get stock data from Finnhub API
     """
+    if not FINNHUB_API_KEY:
+        logging.error("FINNHUB_API_KEY not configured - please set it in Render environment variables")
+        # Return a dummy dataframe with a message column
+        df = pd.DataFrame({'message': ['API key not configured']})
+        return df
+        
     cache_key = get_cache_key("stock_data", ticker, timeframe, interval)
     cached_data = get_cached_data(cache_key)
     if cached_data is not None:
@@ -194,12 +191,18 @@ def get_stock_data(ticker, timeframe='1d', interval='15m'):
             'token': FINNHUB_API_KEY
         }
         
+        logging.info(f"Making Finnhub API request for {ticker} with timeframe={timeframe}, interval={interval}")
         response = requests.get(url, params=params)
+        
+        # Log the response for debugging
+        logging.info(f"Finnhub API response status: {response.status_code}")
+        if response.status_code != 200:
+            logging.error(f"Finnhub API error: {response.text}")
         
         # Check for rate limiting (429 status)
         if response.status_code == 429:
             logging.warning("Rate limit hit, waiting 60 seconds...")
-            sleep(60)  # Wait and try again
+            sleep(10)  # Wait and try again, reduced for debugging
             response = requests.get(url, params=params)
         
         data = response.json()
@@ -218,17 +221,24 @@ def get_stock_data(ticker, timeframe='1d', interval='15m'):
             set_cached_data(cache_key, df)
             return df
         else:
-            logging.error(f"No data returned for {ticker}: {data.get('s')}")
-            return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
+            logging.error(f"No data returned for {ticker}: {data.get('s', 'unknown error')}")
+            # Create a dummy dataframe with the same columns but empty
+            df = pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
+            return df
             
     except Exception as e:
         logging.error(f"Error getting stock data for {ticker}: {str(e)}")
+        logging.error(traceback.format_exc())
         return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
+
 
 def get_option_expirations(ticker):
     """
     Get available option expiration dates for a ticker from Finnhub
     """
+    if not FINNHUB_API_KEY:
+        return []
+        
     cache_key = get_cache_key("option_expirations", ticker)
     cached_data = get_cached_data(cache_key)
     if cached_data is not None:
@@ -261,6 +271,9 @@ def get_option_chain(ticker, expiry):
     """
     Get option chain for a specific expiration date
     """
+    if not FINNHUB_API_KEY:
+        return None
+        
     cache_key = get_cache_key("option_chain", ticker, expiry)
     cached_data = get_cached_data(cache_key)
     if cached_data is not None:
@@ -307,7 +320,7 @@ def get_option_price_history(ticker, option_symbol, timeframe='1d', interval='15
         # Get the stock price history
         stock_data = get_stock_data(ticker, timeframe, interval)
         
-        if stock_data.empty:
+        if stock_data.empty or 'Close' not in stock_data.columns:
             return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
         
         # Create a simulated option price DataFrame
@@ -371,12 +384,16 @@ def get_option_price_history(ticker, option_symbol, timeframe='1d', interval='15
         
     except Exception as e:
         logging.error(f"Error simulating option price history: {str(e)}")
+        logging.error(traceback.format_exc())
         return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
 
 def get_option_data(ticker, option_type, expiry=None, strike=None, timeframe='1d', interval='15m'):
     """
     Get option data with fallbacks and error handling
     """
+    if not FINNHUB_API_KEY:
+        return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
+        
     try:
         # If no expiry provided, get the nearest expiration date
         if not expiry:
@@ -413,7 +430,7 @@ def get_option_data(ticker, option_type, expiry=None, strike=None, timeframe='1d
         if not strike:
             # Get current stock price
             stock_data = get_stock_data(ticker, '1d', '15m')
-            if not stock_data.empty:
+            if not stock_data.empty and 'Close' in stock_data.columns:
                 current_price = stock_data['Close'].iloc[-1]
                 
                 # Find closest strike to current price
@@ -450,12 +467,13 @@ def get_option_data(ticker, option_type, expiry=None, strike=None, timeframe='1d
         
     except Exception as e:
         logging.error(f"Error getting option data: {str(e)}")
+        logging.error(traceback.format_exc())
         return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
 
 def prepare_table_data(data):
     """Format data for the Dash DataTable"""
     table_data = []
-    if not data.empty:
+    if not data.empty and 'Close' in data.columns:
         for idx, row in data.iterrows():
             table_data.append({
                 'Date': idx.strftime('%Y-%m-%d %H:%M:%S'),
@@ -472,12 +490,17 @@ def plot_data(data, title, is_option=False):
     
     # Handle empty data case
     if data.empty or 'Close' not in data.columns:
+        if 'message' in data.columns:
+            message = data['message'].iloc[0] if not data.empty else 'No data available'
+        else:
+            message = 'No data available'
+            
         fig.update_layout(
-            title=f'{title} Prices - No data available',
+            title=f'{title} Prices - {message}',
             xaxis_title='Time',
             yaxis_title='Price',
             annotations=[{
-                'text': 'No data available for the selected parameters',
+                'text': message,
                 'showarrow': False,
                 'font': {'size': 20}
             }]
@@ -576,35 +599,41 @@ def update_data_and_plot(n_intervals,
                          option_ticker, option_type, option_expiry, option_strike,
                          option_timeframe, option_interval):
     """Main callback to update the dashboard"""
-    
-    ctx = dash.callback_context
-    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
-
-    # Initialize outputs
-    stock_fig = go.Figure()
-    option_fig = go.Figure()
-    option_table_data = []
-    alerts = []  # Initialize alerts list
-    
-    # Set default intervals if None
-    stock_interval = stock_interval or '15m'
-    option_interval = option_interval or '15m'
-    
-    # Determine if the market is open
-    market_open = is_market_open()
-    
-    # Set interval based on market status
-    if market_open:
-        update_interval = 60000  # 1 minute interval when market is open
-    else:
-        update_interval = 300000  # 5 minutes interval when market is closed
-        alerts.append(html.Div('Market is currently closed - updates less frequent', style={'color': 'orange'}))
-    
-    # Add API credit/usage warning
-    alerts.append(html.Div('Using Finnhub API with rate limits (60 calls/minute)', style={'color': 'blue'}))
-    
-    # Only update data if user input changed or if market is open and interval update triggered
-    if triggered_id != 'interval-component' or (triggered_id == 'interval-component' and market_open):
+    try:
+        # Initialize outputs
+        stock_fig = go.Figure()
+        option_fig = go.Figure()
+        option_table_data = []
+        alerts = []
+        
+        # Check API key
+        if not FINNHUB_API_KEY:
+            logging.warning("No Finnhub API key found!")
+            alerts.append(html.Div('ERROR: Finnhub API key not configured. Set FINNHUB_API_KEY in Render environment variables.', 
+                                style={'color': 'red', 'fontWeight': 'bold'}))
+            
+            # Create empty plots with error message
+            stock_fig = plot_data(pd.DataFrame({'message': ['API key not configured']}), 'Stock')
+            option_fig = plot_data(pd.DataFrame({'message': ['API key not configured']}), 'Option')
+            return stock_fig, option_fig, [], alerts, 300000  # Return with 5-minute update interval
+            
+        # Set default intervals if None
+        stock_interval = stock_interval or '15m'
+        option_interval = option_interval or '15m'
+        
+        # Determine if the market is open
+        market_open = is_market_open()
+        
+        # Set interval based on market status
+        if market_open:
+            update_interval = 60000  # 1 minute interval when market is open
+        else:
+            update_interval = 300000  # 5 minutes interval when market is closed
+            alerts.append(html.Div('Market is currently closed - updates less frequent', style={'color': 'orange'}))
+        
+        # Add API credit/usage warning
+        alerts.append(html.Div('Using Finnhub API with rate limits (60 calls/minute)', style={'color': 'blue'}))
+        
         # Fetch stock data
         if stock_ticker:
             logging.info(f"Fetching data for {stock_ticker} with timeframe={stock_timeframe}, interval={stock_interval}")
@@ -658,3 +687,63 @@ def update_data_and_plot(n_intervals,
                 # Create an empty plot with a message
                 stock_fig = plot_data(pd.DataFrame(columns=['Close']), f'No data for {stock_ticker}')
                 alerts.append(html.Div(f'No data available for {stock_ticker}', style={'color': 'red'}))
+                
+        # Fetch option data
+        if option_ticker and option_type:
+            try:
+                logging.info(f"Fetching option data for {option_ticker} {option_type} with strike={option_strike}, expiry={option_expiry}")
+                option_data = get_option_data(option_ticker, option_type, option_expiry, option_strike, option_timeframe, option_interval)
+                
+                if not option_data.empty and 'Close' in option_data.columns:
+                    option_table_data = prepare_table_data(option_data)
+                    option_fig = plot_data(option_data, 'Option', is_option=True)
+                else:
+                    option_fig = plot_data(pd.DataFrame(columns=['Close']), f'No option data for {option_ticker}')
+                    if option_expiry and option_strike:
+                        alerts.append(html.Div(f'No option data for {option_ticker} {option_type} {option_strike} {option_expiry}', style={'color': 'red'}))
+                    else:
+                        alerts.append(html.Div(f'Enter expiry date and strike price for options or system will try to find the nearest ones', style={'color': 'orange'}))
+            except Exception as e:
+                logging.error(f"Error processing option data: {e}")
+                logging.error(traceback.format_exc())
+                option_fig = plot_data(pd.DataFrame(columns=['Close']), f'Error loading option data')
+                alerts.append(html.Div(f'Error loading options: {str(e)}', style={'color': 'red'}))
+        else:
+            option_fig = plot_data(pd.DataFrame(columns=['Close']), 'Option - Enter ticker and type')
+            
+        # Ensure alerts is not empty even if there are no alerts
+        alerts_content = html.Div(alerts) if alerts else []
+
+        return stock_fig, option_fig, option_table_data, alerts_content, update_interval
+        
+    except Exception as e:
+        # Catch any unhandled exceptions to prevent callback from failing entirely
+        logging.error(f"Unhandled exception in callback: {str(e)}")
+        logging.error(traceback.format_exc())
+        
+        # Create empty figures with error message
+        stock_fig = go.Figure()
+        stock_fig.update_layout(
+            title="Error in Dashboard",
+            annotations=[{
+                'text': f"An error occurred: {str(e)}",
+                'showarrow': False,
+                'font': {'size': 20, 'color': 'red'}
+            }]
+        )
+        
+        option_fig = go.Figure()
+        option_fig.update_layout(
+            title="Error in Dashboard",
+            annotations=[{
+                'text': "See console for details",
+                'showarrow': False,
+                'font': {'size': 20, 'color': 'red'}
+            }]
+        )
+        
+        alerts_content = html.Div([
+            html.Div(f"ERROR: {str(e)}", style={'color': 'red', 'fontWeight': 'bold'})
+        ])
+        
+        return stock_fig, option_fig, [], alerts_content, 300000  # 5-minute update interval
