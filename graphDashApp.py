@@ -9,10 +9,13 @@ from datetime import datetime, time, timedelta
 import holidays
 import os
 import logging
-import requests
-import json
-from time import sleep
+import yfinance as yf
+import time as time_module
 import traceback
+import random
+from functools import lru_cache
+
+import requests
 
 # Configure logging to see detailed errors
 logging.basicConfig(
@@ -23,25 +26,29 @@ logging.basicConfig(
     ]
 )
 
-# Get API key from environment variable for security
-# You can set this in your Render dashboard under Environment Variables
-FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY", "")
-
-# Add debug logging for API key
-if not FINNHUB_API_KEY:
-    logging.warning("FINNHUB_API_KEY not found in environment variables. Set this in your Render dashboard.")
-
 # Initialize Dash app
 app = dash.Dash(__name__)
 server = app.server  # Important for Render deployment
 
 # List of options for time interval and timeframe
-time_intervals = ['1m', '5m', '15m', '30m', '1h', '1d', '1wk', '1mo']
-timeframes = ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', 'max']
+time_intervals = ['1m', '2m', '5m', '15m', '30m', '1h', '1d', '5d', '1wk', '1mo', '3mo']
+timeframes = ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'max']
 
 # Cache for storing API responses to minimize requests
 data_cache = {}
 CACHE_DURATION = 300  # Cache duration in seconds (5 minutes)
+
+# Define a custom user agent rotation to avoid blocks
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36'
+]
+
+# Track rate limits to avoid being blocked
+last_request_time = 0
+MIN_REQUEST_INTERVAL = 1.0  # Minimum time between requests in seconds
 
 # Layout of the app
 app.layout = html.Div([
@@ -52,7 +59,7 @@ app.layout = html.Div([
             html.H2('Stock'),
             dcc.Input(id='stock-ticker-input', type='text', value='AAPL', placeholder='Enter Stock Ticker Symbol (e.g., AAPL)', style={'width': '50%'}),
             dcc.Dropdown(id='stock-timeframe-dropdown', options=[{'label': i, 'value': i} for i in timeframes], value='1d', placeholder='Select Timeframe', style={'width': '50%'}),
-            dcc.Dropdown(id='stock-interval-dropdown', options=[{'label': i, 'value': i} for i in time_intervals], value='15m', placeholder='Select Interval', style={'width': '50%'}),
+            dcc.Dropdown(id='stock-interval-dropdown', options=[{'label': i, 'value': i} for i in time_intervals], value='5m', placeholder='Select Interval', style={'width': '50%'}),
             html.Div(id='alerts-container'),
             dcc.Graph(id='stock-plot', style={'height': '70vh', 'width': '100%'}),
         ], style={'width': '60%', 'display': 'inline-block', 'vertical-align': 'top'}),
@@ -64,7 +71,7 @@ app.layout = html.Div([
             dcc.Input(id='option-expiry-input', type='text', placeholder='Enter Expiry Date (YYYY-MM-DD)', style={'width': '90%'}),
             dcc.Input(id='option-strike-input', type='number', placeholder='Enter Strike Price', style={'width': '90%'}),
             dcc.Dropdown(id='option-timeframe-dropdown', options=[{'label': i, 'value': i} for i in timeframes], value='1d', placeholder='Select Timeframe', style={'width': '90%'}),
-            dcc.Dropdown(id='option-interval-dropdown', options=[{'label': i, 'value': i} for i in time_intervals], value='15m', placeholder='Select Interval', style={'width': '90%'}),
+            dcc.Dropdown(id='option-interval-dropdown', options=[{'label': i, 'value': i} for i in time_intervals], value='5m', placeholder='Select Interval', style={'width': '90%'}),
             dcc.Graph(id='option-plot', style={'height': '65vh', 'width': '100%'}),
             html.Div(id='option-table-container', children=[
                 html.H2('Option Data Table'),
@@ -80,8 +87,8 @@ app.layout = html.Div([
     ]),
     
     html.Div([
-        html.P(f"Data provided by Finnhub.io - API Key Status: {'Configured' if FINNHUB_API_KEY else 'Not Configured'}", 
-               style={'textAlign': 'center', 'color': 'green' if FINNHUB_API_KEY else 'red', 'fontSize': '12px'}),
+        html.P("Dashboard with enhanced error handling and caching", 
+               style={'textAlign': 'center', 'color': 'gray', 'fontSize': '12px'}),
     ]),
     
     dcc.Interval(
@@ -123,277 +130,181 @@ def set_cached_data(cache_key, data):
     """Store data in cache with current timestamp"""
     data_cache[cache_key] = (data, datetime.now().timestamp())
 
-def convert_timeframe_to_seconds(timeframe):
-    """Convert timeframe string to seconds for Finnhub API"""
-    if timeframe == '1d':
-        return 60 * 60 * 24
-    elif timeframe == '5d':
-        return 60 * 60 * 24 * 5
-    elif timeframe == '1mo':
-        return 60 * 60 * 24 * 30
-    elif timeframe == '3mo':
-        return 60 * 60 * 24 * 90
-    elif timeframe == '6mo':
-        return 60 * 60 * 24 * 180
-    elif timeframe == '1y':
-        return 60 * 60 * 24 * 365
-    elif timeframe == '2y':
-        return 60 * 60 * 24 * 365 * 2
-    elif timeframe == '5y':
-        return 60 * 60 * 24 * 365 * 5
-    elif timeframe == 'max':
-        return 60 * 60 * 24 * 365 * 20  # 20 years should be enough for most stocks
-    return 60 * 60 * 24  # Default to 1 day
+def rate_limit_request():
+    """Apply rate limiting to avoid being blocked"""
+    global last_request_time
+    
+    current_time = time_module.time()
+    elapsed = current_time - last_request_time
+    
+    if elapsed < MIN_REQUEST_INTERVAL:
+        sleep_time = MIN_REQUEST_INTERVAL - elapsed
+        time_module.sleep(sleep_time)
+    
+    last_request_time = time_module.time()
 
-def get_finnhub_resolution(interval):
-    """Convert our interval format to Finnhub's resolution format"""
-    interval_map = {
-        '1m': '1',
-        '5m': '5',
-        '15m': '15',
-        '30m': '30',
-        '1h': '60',
-        '1d': 'D',
-        '1wk': 'W',
-        '1mo': 'M'
-    }
-    return interval_map.get(interval, '15')  # Default to 15 min if not found
+def apply_proxy_settings():
+    """
+    Configure yfinance with random user agent and session settings
+    This helps avoid blocks from Yahoo Finance
+    """
+    user_agent = random.choice(USER_AGENTS)
+    
+    # Set a custom session with headers
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': user_agent,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'TE': 'Trailers'
+    })
+    
+    return session
 
-def get_stock_data(ticker, timeframe='1d', interval='15m'):
+@lru_cache(maxsize=32)
+def get_stock_data(ticker, period='1d', interval='5m', retry_count=0):
     """
-    Get stock data from Finnhub API
+    Get stock data with error handling and retries
+    
+    Args:
+        ticker: Stock ticker symbol
+        period: Time period (1d, 5d, 1mo, etc.)
+        interval: Time interval between data points (1m, 5m, 1d, etc.)
+        retry_count: Number of retries attempted so far
+    
+    Returns:
+        Pandas DataFrame with stock data
     """
-    if not FINNHUB_API_KEY:
-        logging.error("FINNHUB_API_KEY not configured - please set it in Render environment variables")
-        # Return a dummy dataframe with a message column
-        df = pd.DataFrame({'message': ['API key not configured']})
-        return df
-        
-    cache_key = get_cache_key("stock_data", ticker, timeframe, interval)
+    cache_key = get_cache_key("stock_data", ticker, period, interval)
     cached_data = get_cached_data(cache_key)
     if cached_data is not None:
+        logging.info(f"Using cached data for {ticker} {period} {interval}")
         return cached_data
     
+    # Maximum number of retries
+    max_retries = 3
+    
+    # Apply rate limiting
+    rate_limit_request()
+    
     try:
-        resolution = get_finnhub_resolution(interval)
+        logging.info(f"Fetching stock data for {ticker} with period={period}, interval={interval}")
         
-        # Calculate time range
-        end_time = int(datetime.now().timestamp())
-        start_time = end_time - convert_timeframe_to_seconds(timeframe)
+        # Create a ticker object
+        stock = yf.Ticker(ticker)
         
-        # Make API request
-        url = f"https://finnhub.io/api/v1/stock/candle"
-        params = {
-            'symbol': ticker.upper(),
-            'resolution': resolution,
-            'from': start_time,
-            'to': end_time,
-            'token': FINNHUB_API_KEY
-        }
+        # Try to get history with the requested parameters
+        stock_data = stock.history(period=period, interval=interval)
         
-        logging.info(f"Making Finnhub API request for {ticker} with timeframe={timeframe}, interval={interval}")
-        response = requests.get(url, params=params)
-        
-        # Log the response for debugging
-        logging.info(f"Finnhub API response status: {response.status_code}")
-        if response.status_code != 200:
-            logging.error(f"Finnhub API error: {response.text}")
-        
-        # Check for rate limiting (429 status)
-        if response.status_code == 429:
-            logging.warning("Rate limit hit, waiting 60 seconds...")
-            sleep(10)  # Wait and try again, reduced for debugging
-            response = requests.get(url, params=params)
-        
-        data = response.json()
-        
-        # Check if valid data returned
-        if data.get('s') == 'ok' and len(data.get('c', [])) > 0:
-            # Convert to pandas DataFrame
-            df = pd.DataFrame({
-                'Open': data['o'],
-                'High': data['h'],
-                'Low': data['l'],
-                'Close': data['c'],
-                'Volume': data['v'],
-            }, index=pd.to_datetime([datetime.fromtimestamp(ts) for ts in data['t']]))
+        # If we got no data, try with different parameters
+        if stock_data.empty and retry_count < max_retries:
+            if interval == '1m' or interval == '2m' or interval == '5m':
+                # Try with a less granular interval
+                logging.warning(f"No data for {ticker} with interval={interval}, trying with interval=15m")
+                return get_stock_data(ticker, period, '15m', retry_count + 1)
             
-            set_cached_data(cache_key, df)
-            return df
+            elif period == '1d':
+                # Try with a longer period
+                logging.warning(f"No data for {ticker} with period=1d, trying with period=5d")
+                return get_stock_data(ticker, '5d', interval, retry_count + 1)
+            
+            else:
+                # Try daily data as a last resort
+                logging.warning(f"No data for {ticker}, falling back to daily data")
+                return get_stock_data(ticker, '1mo', '1d', retry_count + 1)
+        
+        # Cache and return the data if not empty
+        if not stock_data.empty:
+            set_cached_data(cache_key, stock_data)
+            return stock_data
         else:
-            logging.error(f"No data returned for {ticker}: {data.get('s', 'unknown error')}")
-            # Create a dummy dataframe with the same columns but empty
-            df = pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
-            return df
-            
+            logging.error(f"No data available for {ticker} after multiple retries")
+            return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
+        
     except Exception as e:
-        logging.error(f"Error getting stock data for {ticker}: {str(e)}")
-        logging.error(traceback.format_exc())
-        return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
-
+        logging.error(f"Error fetching data for {ticker}: {str(e)}")
+        
+        # If we haven't reached the maximum retries, try again with different parameters
+        if retry_count < max_retries:
+            logging.info(f"Retrying with different parameters (attempt {retry_count + 1}/{max_retries})")
+            time_module.sleep(2)  # Wait a bit before retrying
+            
+            if 'connection' in str(e).lower() or 'timeout' in str(e).lower():
+                # Network issue, just retry with the same parameters
+                return get_stock_data(ticker, period, interval, retry_count + 1)
+            else:
+                # Try with different parameters
+                if interval in ['1m', '2m', '5m']:
+                    return get_stock_data(ticker, period, '15m', retry_count + 1)
+                elif period == '1d':
+                    return get_stock_data(ticker, '5d', '1h', retry_count + 1)
+                else:
+                    return get_stock_data(ticker, '1mo', '1d', retry_count + 1)
+        else:
+            logging.error(f"Maximum retries reached for {ticker}")
+            return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
 
 def get_option_expirations(ticker):
-    """
-    Get available option expiration dates for a ticker from Finnhub
-    """
-    if not FINNHUB_API_KEY:
-        return []
-        
+    """Get available option expiration dates for a ticker"""
     cache_key = get_cache_key("option_expirations", ticker)
     cached_data = get_cached_data(cache_key)
     if cached_data is not None:
         return cached_data
     
+    # Apply rate limiting
+    rate_limit_request()
+    
     try:
-        url = f"https://finnhub.io/api/v1/stock/option-chain"
-        params = {
-            'symbol': ticker.upper(),
-            'token': FINNHUB_API_KEY
-        }
+        stock = yf.Ticker(ticker)
+        expirations = stock.options
         
-        response = requests.get(url, params=params)
-        data = response.json()
-        
-        # Get all expiration dates
-        if 'data' in data and len(data['data']) > 0:
-            expirations = [exp['expirationDate'] for exp in data['data']]
+        if expirations:
             set_cached_data(cache_key, expirations)
             return expirations
         else:
-            logging.error(f"No option expiration dates found for {ticker}")
+            logging.warning(f"No option expiration dates found for {ticker}")
             return []
-            
     except Exception as e:
         logging.error(f"Error getting option expirations for {ticker}: {str(e)}")
         return []
 
 def get_option_chain(ticker, expiry):
-    """
-    Get option chain for a specific expiration date
-    """
-    if not FINNHUB_API_KEY:
-        return None
-        
+    """Get option chain for a specific expiration date"""
     cache_key = get_cache_key("option_chain", ticker, expiry)
     cached_data = get_cached_data(cache_key)
     if cached_data is not None:
         return cached_data
     
+    # Apply rate limiting
+    rate_limit_request()
+    
     try:
-        url = f"https://finnhub.io/api/v1/stock/option-chain"
-        params = {
-            'symbol': ticker.upper(),
-            'token': FINNHUB_API_KEY
-        }
+        stock = yf.Ticker(ticker)
+        option_chain = stock.option_chain(expiry)
         
-        response = requests.get(url, params=params)
-        data = response.json()
-        
-        # Find the specific expiration date in the data
-        option_data = None
-        for exp_data in data.get('data', []):
-            if exp_data['expirationDate'] == expiry:
-                option_data = exp_data
-                break
-        
-        if option_data:
-            set_cached_data(cache_key, option_data)
-            return option_data
+        if option_chain:
+            set_cached_data(cache_key, option_chain)
+            return option_chain
         else:
-            logging.error(f"No options found for {ticker} with expiry {expiry}")
+            logging.warning(f"No options found for {ticker} with expiry {expiry}")
             return None
-            
     except Exception as e:
         logging.error(f"Error getting option chain for {ticker} with expiry {expiry}: {str(e)}")
         return None
 
-def get_option_price_history(ticker, option_symbol, timeframe='1d', interval='15m'):
+def get_option_data(ticker, option_type, expiry=None, strike=None, period='1d', interval='5m', retry_count=0):
     """
-    Simulate option price history based on stock data since Finnhub free tier 
-    doesn't provide historical option prices
+    Get option data with error handling and retries
     """
-    # In the free tier, Finnhub doesn't provide historical option prices
-    # This is a simplified simulation based on stock price movement
-    # You would replace this with actual option price history in a paid API
+    # Maximum number of retries
+    max_retries = 3
     
-    try:
-        # Get the stock price history
-        stock_data = get_stock_data(ticker, timeframe, interval)
-        
-        if stock_data.empty or 'Close' not in stock_data.columns:
-            return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
-        
-        # Create a simulated option price DataFrame
-        # This is a very simplified model - real option prices have complex determinants
-        option_data = pd.DataFrame(index=stock_data.index)
-        
-        # Determine if call or put based on option symbol (simplified)
-        is_call = 'C' in option_symbol.upper()
-        
-        # Get the current stock price and option strike from the symbol
-        # Parsing the option symbol - this is a simplified example
-        parts = option_symbol.split('_')
-        if len(parts) >= 2:
-            try:
-                strike = float(parts[1])
-            except:
-                # Default to slightly OTM option
-                current_price = stock_data['Close'].iloc[-1]
-                strike = round(current_price * (1.05 if is_call else 0.95), 1)
-        else:
-            # Default to slightly OTM option
-            current_price = stock_data['Close'].iloc[-1]
-            strike = round(current_price * (1.05 if is_call else 0.95), 1)
-        
-        # Very simplified option pricing model based on intrinsic value + time value
-        # This is NOT an accurate model, just for visualization purposes
-        for idx in stock_data.index:
-            stock_price = stock_data.loc[idx, 'Close']
-            days_to_expiry = 30  # Assumed constant days to expiry for simplicity
-            
-            # Intrinsic value
-            if is_call:
-                intrinsic = max(0, stock_price - strike)
-            else:
-                intrinsic = max(0, strike - stock_price)
-            
-            # Simplified time value (decreases as expiry approaches)
-            time_value = stock_price * 0.05 * (days_to_expiry / 365)
-            
-            # Option price = intrinsic value + time value
-            option_price = intrinsic + time_value
-            
-            # Add some volatility based on stock movement
-            if idx > stock_data.index[0]:
-                prev_stock_price = stock_data.loc[stock_data.index[stock_data.index.get_loc(idx) - 1], 'Close']
-                pct_change = (stock_price - prev_stock_price) / prev_stock_price
-                option_data.loc[idx, 'Open'] = option_price * (1 - pct_change * 2)
-                option_data.loc[idx, 'High'] = option_price * (1 + abs(pct_change) * 3)
-                option_data.loc[idx, 'Low'] = option_price * (1 - abs(pct_change) * 3)
-                option_data.loc[idx, 'Close'] = option_price
-            else:
-                option_data.loc[idx, 'Open'] = option_price * 0.98
-                option_data.loc[idx, 'High'] = option_price * 1.02
-                option_data.loc[idx, 'Low'] = option_price * 0.97
-                option_data.loc[idx, 'Close'] = option_price
-            
-            # Simulated volume - proportional to stock volume
-            option_data.loc[idx, 'Volume'] = stock_data.loc[idx, 'Volume'] // 100
-        
-        return option_data
-        
-    except Exception as e:
-        logging.error(f"Error simulating option price history: {str(e)}")
-        logging.error(traceback.format_exc())
-        return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
-
-def get_option_data(ticker, option_type, expiry=None, strike=None, timeframe='1d', interval='15m'):
-    """
-    Get option data with fallbacks and error handling
-    """
-    if not FINNHUB_API_KEY:
-        return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
-        
     try:
         # If no expiry provided, get the nearest expiration date
         if not expiry:
@@ -403,7 +314,6 @@ def get_option_data(ticker, option_type, expiry=None, strike=None, timeframe='1d
                 return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
             
             # Sort and get the nearest expiration
-            expirations.sort()
             expiry = expirations[0]
             logging.info(f"Using nearest expiry date: {expiry}")
         
@@ -414,15 +324,15 @@ def get_option_data(ticker, option_type, expiry=None, strike=None, timeframe='1d
         
         # Filter by option type
         if option_type.lower() == 'c':
-            options = option_chain.get('call', [])
+            options = option_chain.calls
         elif option_type.lower() == 'p':
-            options = option_chain.get('put', [])
+            options = option_chain.puts
         else:
             logging.error(f"Invalid option type: {option_type}")
             return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
         
         # If no options found
-        if not options:
+        if options.empty:
             logging.warning(f"No {option_type} options found for {ticker} with expiry {expiry}")
             return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
         
@@ -434,39 +344,80 @@ def get_option_data(ticker, option_type, expiry=None, strike=None, timeframe='1d
                 current_price = stock_data['Close'].iloc[-1]
                 
                 # Find closest strike to current price
-                closest_option = min(options, key=lambda x: abs(float(x.get('strike', 0)) - current_price))
-                strike = float(closest_option.get('strike', 0))
+                options['diff'] = abs(options['strike'] - current_price)
+                closest_option = options.loc[options['diff'].idxmin()]
+                strike = closest_option['strike']
                 logging.info(f"Using closest strike to current price: {strike}")
             else:
                 # If we can't get current price, use the middle strike
-                strikes = [float(opt.get('strike', 0)) for opt in options]
-                strike = strikes[len(strikes) // 2]
+                strike = options['strike'].median()
                 logging.info(f"Using middle strike: {strike}")
         
         # Find the option with the specified strike
-        option = None
-        for opt in options:
-            if float(opt.get('strike', 0)) == float(strike):
-                option = opt
-                break
+        option = options[options['strike'] == strike]
         
-        if not option:
+        if option.empty:
             logging.warning(f"No option found with strike {strike}")
-            closest_option = min(options, key=lambda x: abs(float(x.get('strike', 0)) - float(strike)))
-            option = closest_option
-            strike = float(option.get('strike', 0))
+            # Find closest available strike
+            options['diff'] = abs(options['strike'] - strike)
+            closest_option = options.loc[options['diff'].idxmin()]
+            strike = closest_option['strike']
+            option = options[options['strike'] == strike]
             logging.info(f"Using closest available strike: {strike}")
         
         # Get the option symbol
-        option_symbol = option.get('contractName', f"{ticker}_{strike}_{option_type}_{expiry}")
+        option_symbol = option['contractSymbol'].iloc[0]
         
-        # Get option price history (simulated in free tier)
-        option_data = get_option_price_history(ticker, option_symbol, timeframe, interval)
+        # Apply rate limiting
+        rate_limit_request()
         
-        return option_data
+        # Cache key for option data
+        cache_key = get_cache_key("option_data", option_symbol, period, interval)
+        cached_data = get_cached_data(cache_key)
+        if cached_data is not None:
+            return cached_data
+        
+        # Get option price history
+        try:
+            option_data = yf.Ticker(option_symbol).history(period=period, interval=interval)
+            
+            # If data is empty, try different parameters
+            if option_data.empty and retry_count < max_retries:
+                if interval in ['1m', '2m', '5m']:
+                    logging.warning(f"No data for option {option_symbol} with interval={interval}, trying 15m")
+                    return get_option_data(ticker, option_type, expiry, strike, period, '15m', retry_count + 1)
+                elif period == '1d':
+                    logging.warning(f"No data for option {option_symbol} with period=1d, trying 5d")
+                    return get_option_data(ticker, option_type, expiry, strike, '5d', interval, retry_count + 1)
+                else:
+                    logging.warning(f"No data for option {option_symbol}, trying daily data")
+                    return get_option_data(ticker, option_type, expiry, strike, '1mo', '1d', retry_count + 1)
+            
+            # If we have data, cache and return it
+            if not option_data.empty:
+                set_cached_data(cache_key, option_data)
+                return option_data
+            else:
+                logging.error(f"No option data available for {option_symbol} after retries")
+                return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
+                
+        except Exception as e:
+            logging.error(f"Error getting option data for {option_symbol}: {str(e)}")
+            
+            # Retry with different parameters if we haven't reached max retries
+            if retry_count < max_retries:
+                time_module.sleep(2)  # Wait before retrying
+                if interval in ['1m', '2m', '5m']:
+                    return get_option_data(ticker, option_type, expiry, strike, period, '15m', retry_count + 1)
+                elif period == '1d':
+                    return get_option_data(ticker, option_type, expiry, strike, '5d', '1h', retry_count + 1)
+                else:
+                    return get_option_data(ticker, option_type, expiry, strike, '1mo', '1d', retry_count + 1)
+            else:
+                return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
         
     except Exception as e:
-        logging.error(f"Error getting option data: {str(e)}")
+        logging.error(f"Error in get_option_data: {str(e)}")
         logging.error(traceback.format_exc())
         return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
 
@@ -490,17 +441,12 @@ def plot_data(data, title, is_option=False):
     
     # Handle empty data case
     if data.empty or 'Close' not in data.columns:
-        if 'message' in data.columns:
-            message = data['message'].iloc[0] if not data.empty else 'No data available'
-        else:
-            message = 'No data available'
-            
         fig.update_layout(
-            title=f'{title} Prices - {message}',
+            title=f'{title} Prices - No data available',
             xaxis_title='Time',
             yaxis_title='Price',
             annotations=[{
-                'text': message,
+                'text': 'No data available for the selected parameters',
                 'showarrow': False,
                 'font': {'size': 20}
             }]
@@ -561,19 +507,20 @@ def plot_data(data, title, is_option=False):
 def update_intervals(stock_timeframe, option_timeframe):
     """Update available intervals based on selected timeframe"""
     interval_options = {
-        '1d': [{'label': i, 'value': i} for i in ['1m', '5m', '15m', '30m', '1h', '1d']],
-        '5d': [{'label': i, 'value': i} for i in ['5m', '15m', '30m', '1h', '1d']],
-        '1mo': [{'label': i, 'value': i} for i in ['15m', '30m', '1h', '1d', '1wk']],
-        '3mo': [{'label': i, 'value': i} for i in ['1h', '1d', '1wk']],
-        '6mo': [{'label': i, 'value': i} for i in ['1d', '1wk']],
+        '1d': [{'label': i, 'value': i} for i in ['1m', '2m', '5m', '15m', '30m', '1h', '1d']],
+        '5d': [{'label': i, 'value': i} for i in ['5m', '15m', '30m', '1h', '1d', '5d']],
+        '1mo': [{'label': i, 'value': i} for i in ['15m', '30m', '1h', '1d', '1wk', '1mo']],
+        '3mo': [{'label': i, 'value': i} for i in ['1h', '1d', '1wk', '1mo']],
+        '6mo': [{'label': i, 'value': i} for i in ['1d', '1wk', '1mo']],
         '1y': [{'label': i, 'value': i} for i in ['1d', '1wk', '1mo']],
         '2y': [{'label': i, 'value': i} for i in ['1d', '1wk', '1mo']],
         '5y': [{'label': i, 'value': i} for i in ['1d', '1wk', '1mo']],
+        '10y': [{'label': i, 'value': i} for i in ['1d', '1wk', '1mo']],
         'max': [{'label': i, 'value': i} for i in ['1d', '1wk', '1mo']],
     }
     
-    stock_intervals = interval_options.get(stock_timeframe, [{'label': i, 'value': i} for i in ['15m', '1h', '1d']])
-    option_intervals = interval_options.get(option_timeframe, [{'label': i, 'value': i} for i in ['15m', '1h', '1d']])
+    stock_intervals = interval_options.get(stock_timeframe, [{'label': i, 'value': i} for i in ['5m', '15m', '1h', '1d']])
+    option_intervals = interval_options.get(option_timeframe, [{'label': i, 'value': i} for i in ['5m', '15m', '1h', '1d']])
     
     return stock_intervals, option_intervals
 
@@ -605,21 +552,10 @@ def update_data_and_plot(n_intervals,
         option_fig = go.Figure()
         option_table_data = []
         alerts = []
-        
-        # Check API key
-        if not FINNHUB_API_KEY:
-            logging.warning("No Finnhub API key found!")
-            alerts.append(html.Div('ERROR: Finnhub API key not configured. Set FINNHUB_API_KEY in Render environment variables.', 
-                                style={'color': 'red', 'fontWeight': 'bold'}))
-            
-            # Create empty plots with error message
-            stock_fig = plot_data(pd.DataFrame({'message': ['API key not configured']}), 'Stock')
-            option_fig = plot_data(pd.DataFrame({'message': ['API key not configured']}), 'Option')
-            return stock_fig, option_fig, [], alerts, 300000  # Return with 5-minute update interval
             
         # Set default intervals if None
-        stock_interval = stock_interval or '15m'
-        option_interval = option_interval or '15m'
+        stock_interval = stock_interval or '5m'
+        option_interval = option_interval or '5m'
         
         # Determine if the market is open
         market_open = is_market_open()
@@ -631,8 +567,8 @@ def update_data_and_plot(n_intervals,
             update_interval = 300000  # 5 minutes interval when market is closed
             alerts.append(html.Div('Market is currently closed - updates less frequent', style={'color': 'orange'}))
         
-        # Add API credit/usage warning
-        alerts.append(html.Div('Using Finnhub API with rate limits (60 calls/minute)', style={'color': 'blue'}))
+        # Add info about data source and caching
+        alerts.append(html.Div('Using Yahoo Finance data with caching and error handling', style={'color': 'blue'}))
         
         # Fetch stock data
         if stock_ticker:
