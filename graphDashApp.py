@@ -1,4 +1,3 @@
-
 # STILL HAVE TO CHANGE BEAUTIFUL SOUP TO SELENIUM.
 import dash
 from dash import dcc, html, dash_table

@@ -37,7 +37,8 @@ timeframes = ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'max']
 # Cache for storing API responses to minimize requests
 data_cache = {}
 CACHE_DURATION = 3600  # Cache duration: 1 hour
-
+# Track the last used ticker
+last_used_ticker = ""
 # --- ENHANCED RATE LIMITING ---
 
 # Generate a dynamic list of user agents
@@ -99,10 +100,16 @@ def get_session(use_new=False):
     # Return a random existing session
     return random.choice(list(sessions.values()))
 
+def normalize_ticker(ticker):
+    """Convert ticker to uppercase and strip any whitespace"""
+    if ticker:
+        return ticker.strip().upper()
+    return ticker
+
 # --- ENHANCED RATE LIMITING ---
-def rate_limit_request():
+def rate_limit_request(is_new_ticker=False):
     """
-    Apply strict rate limiting with random delays between 60-70 seconds
+    Apply rate limiting with different rules for new tickers vs. refreshes
     Returns True if a request is allowed, False if it should be blocked
     """
     global last_request_time
@@ -110,19 +117,48 @@ def rate_limit_request():
     current_time = time_module.time()
     elapsed = current_time - last_request_time
     
-    # Minimum wait time is 60 seconds plus a random amount (0-10 seconds)
-    min_interval = 60.0 + random.uniform(0, 10.0)
+    # If this is a new ticker, use a shorter interval (6 seconds)
+    # This allows up to 10 API calls per minute for new tickers
+    if is_new_ticker:
+        min_interval = 6.0 + random.uniform(0, 2.0)
+    else:
+        # Regular refresh interval (60-70 seconds)
+        min_interval = 60.0 + random.uniform(0, 10.0)
     
-    # Check if at least min_interval seconds have passed since the last request
+    # Check if enough time has passed since the last request
     if elapsed < min_interval:
         logging.warning(f"Rate limit enforced: Only {elapsed:.1f}s elapsed since last request. "
-                        f"Must wait {min_interval - elapsed:.1f}s more.")
+                      f"Must wait {min_interval - elapsed:.1f}s more."
+                      f" ({'New ticker' if is_new_ticker else 'Refresh'})")
         return False
     
     # Update last request time
     last_request_time = current_time
     logging.info(f"Request allowed after {elapsed:.1f}s. Next request will wait ~{min_interval:.1f}s")
     return True
+# def rate_limit_request():
+#     """
+#     Apply strict rate limiting with random delays between 60-70 seconds
+#     Returns True if a request is allowed, False if it should be blocked
+#     """
+#     global last_request_time
+    
+#     current_time = time_module.time()
+#     elapsed = current_time - last_request_time
+    
+#     # Minimum wait time is 60 seconds plus a random amount (0-10 seconds)
+#     min_interval = 60.0 + random.uniform(0, 10.0)
+    
+#     # Check if at least min_interval seconds have passed since the last request
+#     if elapsed < min_interval:
+#         logging.warning(f"Rate limit enforced: Only {elapsed:.1f}s elapsed since last request. "
+#                         f"Must wait {min_interval - elapsed:.1f}s more.")
+#         return False
+    
+#     # Update last request time
+#     last_request_time = current_time
+#     logging.info(f"Request allowed after {elapsed:.1f}s. Next request will wait ~{min_interval:.1f}s")
+#     return True
 
 def get_cache_key(func_name, *args):
     """Generate a cache key based on function name and arguments"""
@@ -228,7 +264,7 @@ def is_market_open():
 #         logging.error(f"Unhandled error for {ticker}: {str(e)}")
 #         logging.error(traceback.format_exc())
 #         return pd.DataFrame()
-def get_stock_data(ticker, period='1d', interval='5m', retry_count=0):
+def get_stock_data(ticker, period='1d', interval='5m', retry_count=0, is_new_ticker=False):
     """
     Get stock data with strict rate limiting
     """
@@ -242,7 +278,7 @@ def get_stock_data(ticker, period='1d', interval='5m', retry_count=0):
         return cached_data
     
     # Check if we're allowed to make a request (respects global rate limit)
-    if not rate_limit_request():
+    if not rate_limit_request(is_new_ticker):
         # Return empty DataFrame with message logged
         logging.warning("Rate limit enforced - returning empty data")
         return pd.DataFrame()
@@ -663,7 +699,16 @@ def update_data_and_plot(n_intervals,
                          option_ticker, option_type, option_expiry, option_strike,
                          option_timeframe, option_interval):
     """Main callback to update the dashboard with improved error handling"""
+    global last_used_ticker
+    
+    """Main callback to update the dashboard with improved error handling"""
     try:
+        # Normalize tickers to uppercase
+        stock_ticker = normalize_ticker(stock_ticker)
+        option_ticker = normalize_ticker(option_type)
+        
+        # Check if stock ticker has changed
+        is_new_ticker = stock_ticker != last_used_ticker and stock_ticker
         # Initialize outputs
         stock_fig = go.Figure()
         option_fig = go.Figure()
@@ -679,6 +724,10 @@ def update_data_and_plot(n_intervals,
         
         # Determine if the market is open
         market_open = is_market_open()
+
+        # Add info about data source and caching
+        if is_new_ticker:
+            alerts.append(html.Div(f'New ticker detected: {stock_ticker} - Using faster rate limiting', style={'color': 'blue'}))
         
         # Add info about data source and caching
         alerts.append(html.Div('Using Yahoo Finance data with caching and strict rate limiting (1 request per minute)', style={'color': 'blue'}))
@@ -691,6 +740,10 @@ def update_data_and_plot(n_intervals,
             logging.info(f"Fetching data for {stock_ticker} with timeframe={stock_timeframe}, interval={stock_interval}")
             stock_data = get_stock_data(stock_ticker, stock_timeframe, stock_interval)
             
+            # Update the last used ticker after successful fetch
+            if not stock_data.empty:
+                last_used_ticker = stock_ticker
+
             # Check if we got stock data
             if stock_data.empty:
                 stock_fig = go.Figure()
@@ -713,7 +766,7 @@ def update_data_and_plot(n_intervals,
                 option_fig.update_layout(
                     title="No Data Available",
                     annotations=[{
-                        'text': "Try refreshing in 1 minute to see data.",
+                        'text': "Please input option data to see graph.",
                         'showarrow': False,
                         'font': {'size': 16, 'color': 'red'}
                     }]
