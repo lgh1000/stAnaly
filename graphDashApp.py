@@ -30,13 +30,13 @@ app.layout = html.Div([
     
     html.Div([
         html.Div([
-            html.H2('Stock', style={'textAlign': 'center'}),
+            # Removed the html.H2('Stock') component
             dcc.Input(
                 id='stock-ticker-input', 
                 type='text', 
                 value='NVDA', 
                 placeholder='Enter Stock Ticker Symbol (e.g., aapl)', 
-                style={'width': '50%', 'margin': '0 auto', 'display': 'block'}
+                style={'width': '50%', 'margin': '10px auto', 'display': 'block', 'height': '36px'}
             ),
             dcc.Dropdown(
                 id='stock-timeframe-dropdown', 
