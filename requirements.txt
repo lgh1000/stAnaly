@@ -35,6 +35,7 @@ setuptools==70.1.1
 six==1.16.0
 soupsieve==2.5
 tenacity==8.4.2
+textblob
 typing_extensions==4.12.2
 tzdata==2024.1
 urllib3==2.2.2
